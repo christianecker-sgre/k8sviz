@@ -115,6 +115,10 @@ Usage of ./k8sviz:
         output filename (shorthand) (default "k8sviz.out")
   -outfile string
         output filename (default "k8sviz.out")
+  -s string
+        split by resource type (hpa, cronjob, deploy, job, sts, ds, rs, pod, pvc, svc, ing) (shorthand)
+  -split string
+        split by resource type (hpa, cronjob, deploy, job, sts, ds, rs, pod, pvc, svc, ing)
   -t string
         type of output (shorthand) (default "dot")
   -type string
