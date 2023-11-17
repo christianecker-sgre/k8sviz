@@ -403,6 +403,9 @@ func (g *Graph) genIngSvcRef() {
 	// ```
 	for _, ing := range g.res.Ingresses.Items {
 		for _, rule := range ing.Spec.Rules {
+			if nil == rule.IngressRuleValue.HTTP || nil == rule.IngressRuleValue.HTTP.Paths {
+				continue
+			}
 			for _, path := range rule.IngressRuleValue.HTTP.Paths {
 				if !g.res.HasResource("svc", path.Backend.Service.Name) {
 					fmt.Fprintf(os.Stderr, "svc %s not found for ingress %s\n", path.Backend.Service.Name, ing.Name)
