@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/awalterschulze/gographviz"
-	"github.com/mkimuram/k8sviz/pkg/resources"
+	"github.com/christianecker-sgre/k8sviz/pkg/resources"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -92,6 +92,11 @@ func (g *Graph) PlotDotFile(outFile, outType string) error {
 	}
 
 	return f.Close()
+}
+
+// GetGviz returns the graphviz object
+func (g *Graph) GetGviz() *gographviz.Graph {
+	return g.gviz
 }
 
 // toDot returns a string representation of the graph with dot format

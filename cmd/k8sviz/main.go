@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mkimuram/k8sviz/pkg/graph"
-	"github.com/mkimuram/k8sviz/pkg/resources"
+	"github.com/christianecker-sgre/k8sviz/pkg/graph"
+	"github.com/christianecker-sgre/k8sviz/pkg/resources"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -24,9 +24,11 @@ const (
 	defaultNamespace   = "default"
 	defaultOutFile     = "k8sviz.out"
 	defaultOutType     = "dot"
+	defaultSplit       = ""
 	descNamespaceOpt   = "namespace to visualize"
 	descOutFileOpt     = "output filename"
 	descOutTypeOpt     = "type of output"
+	descOutSplitOpt    = "split by resource type (hpa, cronjob, deploy, job, sts, ds, rs, pod, pvc, svc, ing)"
 	descShortOptSuffix = " (shorthand)"
 )
 
@@ -37,6 +39,7 @@ var (
 	namespace string
 	outFile   string
 	outType   string
+	outSplit  string
 )
 
 func init() {
@@ -55,6 +58,8 @@ func init() {
 	flag.StringVar(&outFile, "o", defaultOutFile, descOutFileOpt+descShortOptSuffix)
 	flag.StringVar(&outType, "type", defaultOutType, descOutTypeOpt)
 	flag.StringVar(&outType, "t", defaultOutType, descOutTypeOpt+descShortOptSuffix)
+	flag.StringVar(&outSplit, "split", defaultSplit, descOutSplitOpt)
+	flag.StringVar(&outSplit, "s", defaultSplit, descOutSplitOpt+descShortOptSuffix)
 	flag.Parse()
 
 	// use the current context in kubeconfig
@@ -97,17 +102,33 @@ func main() {
 		os.Exit(1)
 	}
 
-	g := graph.NewGraph(res, dir)
+	totalGraph := graph.NewGraph(res, dir)
+	gr := totalGraph.GetGviz()
 
-	if outType == "dot" {
-		if err := g.WriteDotFile(outFile); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to output %q file with format %q for namespace %q: %v\n", outFile, outType, namespace, err)
-			os.Exit(1)
+	splitRes, err := resources.SplitResources(res, outSplit, gr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to apply split: %v\n", err)
+		os.Exit(1)
+	}
+
+	for i, sr := range splitRes {
+		filename := fmt.Sprintf("%v-%v", i, outFile)
+		if len(splitRes) == 1 {
+			filename = outFile
 		}
-	} else {
-		if err := g.PlotDotFile(outFile, outType); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to output %q file with format %q for namespace %q: %v\n", outFile, outType, namespace, err)
-			os.Exit(1)
+		fmt.Println("generate graph", i)
+		g := graph.NewGraph(sr, dir)
+
+		if outType == "dot" {
+			if err := g.WriteDotFile(filename); err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to output %q file with format %q for namespace %q: %v\n", outFile, outType, namespace, err)
+				os.Exit(1)
+			}
+		} else {
+			if err := g.PlotDotFile(filename, outType); err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to output %q file with format %q for namespace %q: %v\n", outFile, outType, namespace, err)
+				os.Exit(1)
+			}
 		}
 	}
 }

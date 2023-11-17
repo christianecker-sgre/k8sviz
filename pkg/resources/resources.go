@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/awalterschulze/gographviz"
 	appsv1 "k8s.io/api/apps/v1"
 	autov1 "k8s.io/api/autoscaling/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	netv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -53,6 +55,8 @@ type Resources struct {
 	Ingresses *netv1.IngressList
 	Hpas      *autov1.HorizontalPodAutoscalerList
 }
+
+type ResourceGraph map[string][]string
 
 // NewResources resturns Resources for the namespace
 func NewResources(clientset kubernetes.Interface, namespace string) (*Resources, error) {
@@ -215,4 +219,155 @@ func NormalizeResource(resource string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("failed to find normalized resource name for %s", resource)
+}
+
+func SplitResources(in *Resources, split string, totalGraph *gographviz.Graph) ([]*Resources, error) {
+	if split == "" {
+		return []*Resources{in}, nil
+	}
+
+	// build graph representation
+	graph := ResourceGraph{}
+	for _, j := range totalGraph.Edges.Edges {
+		if _, ok := graph[j.Src]; ok {
+			graph[j.Src] = append(graph[j.Src], j.Dst)
+		} else {
+			graph[j.Src] = []string{j.Dst}
+		}
+	}
+
+	roots := in.GetResourceNames(split)
+	out := make([]*Resources, len(roots))
+
+	svcs := in.Svcs.DeepCopy().Items
+	pvcs := in.Pvcs.DeepCopy().Items
+	pods := in.Pods.DeepCopy().Items
+	stss := in.Stss.DeepCopy().Items
+	dss := in.Dss.DeepCopy().Items
+	rss := in.Rss.DeepCopy().Items
+	deploys := in.Deploys.DeepCopy().Items
+	jobs := in.Jobs.DeepCopy().Items
+	cronJobs := in.CronJobs.DeepCopy().Items
+	ingresses := in.Ingresses.DeepCopy().Items
+	hpas := in.Hpas.DeepCopy().Items
+	for i, r := range roots {
+		root := resourceName(split, r)
+		out[i] = &Resources{
+			Namespace: in.Namespace,
+			Svcs:      &v1.ServiceList{},
+			Pvcs:      &v1.PersistentVolumeClaimList{},
+			Pods:      &v1.PodList{},
+			Stss:      &appsv1.StatefulSetList{},
+			Dss:       &appsv1.DaemonSetList{},
+			Rss:       &appsv1.ReplicaSetList{},
+			Deploys:   &appsv1.DeploymentList{},
+			Jobs:      &batchv1.JobList{},
+			CronJobs:  &batchv1.CronJobList{},
+			Ingresses: &netv1.IngressList{},
+			Hpas:      &autov1.HorizontalPodAutoscalerList{},
+		}
+
+		out[i].Svcs.Items, svcs = filter(svcs, graph, root)
+		out[i].Pvcs.Items, pvcs = filter(pvcs, graph, root)
+		out[i].Pods.Items, pods = filter(pods, graph, root)
+		out[i].Stss.Items, stss = filter(stss, graph, root)
+		out[i].Dss.Items, dss = filter(dss, graph, root)
+		out[i].Rss.Items, rss = filter(rss, graph, root)
+		out[i].Deploys.Items, deploys = filter(deploys, graph, root)
+		out[i].Jobs.Items, jobs = filter(jobs, graph, root)
+		out[i].CronJobs.Items, cronJobs = filter(cronJobs, graph, root)
+		out[i].Ingresses.Items, ingresses = filter(ingresses, graph, root)
+		out[i].Hpas.Items, hpas = filter(hpas, graph, root)
+	}
+
+	// add rest
+	if len(svcs) > 0 || len(pvcs) > 0 || len(pods) > 0 || len(stss) > 0 || len(dss) > 0 || len(rss) > 0 ||
+		len(deploys) > 0 || len(jobs) > 0 || len(cronJobs) > 0 || len(ingresses) > 0 || len(hpas) > 0 {
+		out = append(out, &Resources{
+			Namespace: in.Namespace,
+			Svcs:      &corev1.ServiceList{Items: svcs},
+			Pvcs:      &corev1.PersistentVolumeClaimList{Items: pvcs},
+			Pods:      &corev1.PodList{Items: pods},
+			Stss:      &appsv1.StatefulSetList{Items: stss},
+			Dss:       &appsv1.DaemonSetList{Items: dss},
+			Rss:       &appsv1.ReplicaSetList{Items: rss},
+			Deploys:   &appsv1.DeploymentList{Items: deploys},
+			Jobs:      &batchv1.JobList{Items: jobs},
+			CronJobs:  &batchv1.CronJobList{Items: cronJobs},
+			Ingresses: &netv1.IngressList{Items: ingresses},
+			Hpas:      &autov1.HorizontalPodAutoscalerList{Items: hpas},
+		})
+	}
+	return out, nil
+}
+
+func filter[T any](residualItems []T, graph ResourceGraph, root string) (inResources []T, otherResources []T) {
+	for _, j := range residualItems {
+		if isConnected(graph, root, j) {
+			inResources = append(inResources, j)
+		} else {
+			otherResources = append(otherResources, j)
+		}
+	}
+
+	return inResources, otherResources
+}
+
+func isConnected(graph ResourceGraph, root string, targetRes interface{}) bool {
+	return DFS(graph, root, getObjectName(targetRes), make(map[string]bool)) || DFS(graph, getObjectName(targetRes), root, make(map[string]bool))
+}
+
+func getObjectName(v interface{}) string {
+	switch v.(type) {
+	case v1.Service:
+		return resourceName("svc", v.(v1.Service).Name)
+	case v1.PersistentVolumeClaim:
+		return resourceName("pvc", v.(v1.PersistentVolumeClaim).Name)
+	case v1.Pod:
+		return resourceName("pod", v.(v1.Pod).Name)
+	case appsv1.StatefulSet:
+		return resourceName("sts", v.(appsv1.StatefulSet).Name)
+	case appsv1.DaemonSet:
+		return resourceName("ds", v.(appsv1.DaemonSet).Name)
+	case appsv1.ReplicaSet:
+		return resourceName("rs", v.(appsv1.ReplicaSet).Name)
+	case appsv1.Deployment:
+		return resourceName("deploy", v.(appsv1.Deployment).Name)
+	case batchv1.Job:
+		return resourceName("job", v.(batchv1.Job).Name)
+	case batchv1.CronJob:
+		return resourceName("cj", v.(batchv1.CronJob).Name)
+	case netv1.Ingress:
+		return resourceName("ing", v.(netv1.Ingress).Name)
+	case autov1.HorizontalPodAutoscaler:
+		return resourceName("hpa", v.(autov1.HorizontalPodAutoscaler).Name)
+	default:
+		panic("unknown type")
+	}
+}
+
+func DFS(graph ResourceGraph, start, target string, visited map[string]bool) bool {
+	if start == target {
+		return true
+	}
+
+	visited[start] = true
+
+	for _, neighbor := range graph[start] {
+		if !visited[neighbor] {
+			if DFS(graph, neighbor, target, visited) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func escapeName(name string) string {
+	return strings.NewReplacer(".", "_", "-", "_").Replace(name)
+}
+
+func resourceName(resType, name string) string {
+	return resType + "_" + escapeName(name)
 }

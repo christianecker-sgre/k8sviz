@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/andreyvit/diff"
-	"github.com/mkimuram/k8sviz/pkg/resources"
+	"github.com/christianecker-sgre/k8sviz/pkg/resources"
 	appsv1 "k8s.io/api/apps/v1"
 	autov1 "k8s.io/api/autoscaling/v1"
 	batchv1 "k8s.io/api/batch/v1"
@@ -28,7 +28,7 @@ var (
 	goldenSuffix = ".golden"
 	// if -update flag is specified on test run, golden file for the test will be updated
 	// Please run:
-	// $ go test github.com/mkimuram/k8sviz/pkg/graph -update=true
+	// $ go test github.com/christianecker-sgre/k8sviz/pkg/graph -update=true
 	update = flag.Bool("update", false, "update the golden files")
 
 	testRes1 = []runtime.Object{
